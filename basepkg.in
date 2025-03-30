@@ -1,0 +1,123 @@
+#!/bin/bash
+
+INSTALL_DIR="/usr/local/bin"
+DB_DIR="/var/lib/basepkg"
+REPO_URL="https://raw.githubusercontent.com/emerge6/openbase-repo/main/packages"
+TEMP_DIR="/tmp/basepkg"
+
+
+
+install_prepare() {
+if [[  $(id -u) -ne 0 ]]; then
+    echo "Ошибка: Скрипт должен быть запущен от root!" 
+    exit 1
+
+
+    else
+	    mkdir -p "$DB_DIR" "$TEMP_DIR"
+fi
+}
+
+show_help() {
+cat <<EOF
+Использование: basepkg [команда] [аргументы]
+Команды:
+install <пакет>  - Установить пакет
+remove <пакет>   - Удалить пакет
+update           - Обновить список пакетов
+list             - Показать установленные пакеты
+help             - Показать этот список
+
+EOF
+
+}
+
+download_file() {
+    local url="$1"
+    local output="$2"
+    if command -v curl >/dev/null 2>&1; then
+        curl -s -L "$url" -o "$output"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q "$url" -O "$output"
+    else
+        echo "вам нужен curl или wget"
+        exit 1
+    fi
+}
+
+install_package() {
+install_prepare
+    local pkg_name="$1"
+    local pkg_file="$TEMP_DIR/$pkg_name.tar.gz"
+    local pkg_info="$DB_DIR/$pkg_name.info"
+
+    echo "Установка $pkg_name..."
+    download_file "$REPO_URL/$pkg_name.tar.gz" "$pkg_file"
+
+    if [[ ! -f "$pkg_file" ]]; then
+        echo "не удалось загрузить пакет $pkg_name."
+        exit 1
+    fi
+
+    tar -xzf "$pkg_file" -C "$TEMP_DIR"
+    mv "$TEMP_DIR/$pkg_name/bin/"* "$INSTALL_DIR/"
+    echo "name=$pkg_name" > "$pkg_info"
+    echo "version=1.0" >> "$pkg_info"
+
+    rm -rf "$TEMP_DIR/$pkg_name" "$pkg_file"
+    echo "$pkg_name установлен."
+}
+
+remove_package() {
+    local pkg_name="$1"
+    local pkg_info="$DB_DIR/$pkg_name.info"
+
+    if [[ ! -f "$pkg_info" ]]; then
+        echo "пакет $pkg_name не установлен."
+        exit 1
+    fi
+
+    source "$pkg_info"
+    rm -f "$INSTALL_DIR/$pkg_name"
+    rm -f "$pkg_info"
+    echo "Пакет $pkg_name удалён."
+}
+
+update_packages() {
+    echo "Обновление списка пакетов..."
+    download_file "$REPO_URL/package_list.txt" "$DB_DIR/package_list.txt"
+    echo "Список пакетов обновлён."
+}
+
+list_packages() {
+    echo "Пакеты:"
+    ls "$DB_DIR"/*.info 2>/dev/null | while read -r file; do
+        source "$file"
+        echo "- $name (версия: $version)"
+    done
+}
+
+case "$1" in
+    install)
+        [[ -z "$2" ]] && { echo "укажите имя пакета."; exit 1; }
+        install_package "$2"
+        ;;
+    remove)
+        [[ -z "$2" ]] && { echo "Ошибка: укажите имя пакета."; exit 1; }
+        remove_package "$2"
+        ;;
+    update)
+        update_packages
+        ;;
+    list)
+        list_packages
+        ;;
+    help|"")
+        show_help
+        ;;
+    *)
+        echo "Неизвестная команда: $1"
+        show_help
+        exit 1
+        ;;
+esac
